@@ -23,7 +23,7 @@ import (
 	"net"
 	"os"
 	"strings"
-	"syscall"
+//	"syscall"
 	"time"
 )
 
@@ -179,9 +179,9 @@ func (l *SocketUnix) Listen(parseChannel chan string, logger Logger, config *Con
 	if l.Addr == "" {
 		panic("Could not establish a Unix socket. No sock file specified.")
 	}
-	oldMask := syscall.Umask(0011)
+//	oldMask := syscall.Umask(0011) // +build linux,386 darwin,!cgo
 	listener, err := net.Listen("unix", l.Addr)
-	_ = syscall.Umask(oldMask)
+//	_ = syscall.Umask(oldMask) // +build linux,386 darwin,!cgo
 	if err != nil {
 		panic(fmt.Sprintf("Could not establish a Unix socket. %s", err))
 	}

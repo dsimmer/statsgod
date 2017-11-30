@@ -24,7 +24,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/acquia/statsgod/statsgod"
+	"GOld/statsd/statsgod"
 	"io/ioutil"
 	"os"
 	"runtime/pprof"
