@@ -24,10 +24,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"GOld/statsd/statsgod"
 	"io/ioutil"
 	"os"
 	"runtime/pprof"
+
+	"github.com/Dolmant/statsgod/statsgod"
 )
 
 const (

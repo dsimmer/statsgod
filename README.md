@@ -55,7 +55,7 @@ Client code can send metrics via any one of three sockets which listen concurren
 		- connection.udp.port
 		- connection.udp.maxpacket (buffer size to read incoming packets)
 
-3. Unix Domain Socket
+3. Unix Domain Socket // I have disabled this as syscalls arent portable
 	- Allows multiple metrics to be sent over a connection, separated by a newline character.
 	- Connection will remain open until closed by the client.
 	- Config:

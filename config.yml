@@ -1,0 +1,94 @@
+# Copyright 2015 Acquia, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+###
+# Main server configuration
+###
+service:
+    name: "statsgod"
+    auth: "none"            # One of "none" or "token".
+    tokens:
+        "token-name": false # A list of tokens for auth: "ConfigToken". Use the
+                            # format: [token]: [valid] where [token] is the token
+                            # string and [valid] is a boolean value describing
+                            # whether or not the token is valid.
+    hostname: ""            # Leave hostname empty to use the current hostname.
+
+###
+# Socket connections
+###
+connection:
+    tcp:
+        enabled: true
+        host: 127.0.0.1
+        port: 8125
+    udp:
+        enabled: true
+        host: 127.0.0.1
+        port: 8126
+        maxpacket: 1024
+    unix:
+        enabled: false
+        file: /var/run/statsgod/statsgod.sock
+
+###
+# Backend relay carbon server configuration
+###
+carbon:
+   host: 127.0.0.1
+   port: 2003
+
+###
+# Relay connection options
+###
+relay:
+    type: carbon   # One of "mock" or "carbon".
+    concurrency: 1 # Normally use 1 for carbon.
+    timeout: 30s   # How long to sit idle on a connection.
+    flush: 10s     # How frequently to flush to the relay.
+
+###
+# Namespace options
+###
+namespace:
+    prefix: "stats"
+    prefixes:
+        counters: "counts"
+        gauges: "gauges"
+        rates: "rates"
+        sets: "sets"
+        timers: "timers"
+    suffix: ""
+    suffixes:
+        counters: ""
+        gauges: ""
+        rates: ""
+        sets: ""
+        timers: ""
+
+###
+# Stats options
+###
+stats:
+    percentile:
+        - 80
+###
+# Debug options
+###
+debug:
+    verbose: false # Increases the logging output.
+    receipt: false # Logs a message with the parsed metric.
+    profile: false # Profile the program with runtime/pprof.
+    relay: false   # Relay internal runtime information as metrics.
