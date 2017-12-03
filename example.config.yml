@@ -46,9 +46,10 @@ connection:
 ###
 # Backend relay carbon server configuration
 ###
-carbon:
+backend:
    host: 127.0.0.1
-   port: 2003
+   port: 8086
+   db: statsd
 
 ###
 # Relay connection options

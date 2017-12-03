@@ -23,12 +23,17 @@ package statsgod
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/influxdata/influxdb/client/v2"
 )
 
 const (
+	// RelayTypeInfluxDB is an enum describing a carbon backend relay.
+	RelayTypeInfluxDB = "influxdb"
 	// RelayTypeCarbon is an enum describing a carbon backend relay.
 	RelayTypeCarbon = "carbon"
 	// RelayTypeMock is an enum describing a mock backend relay.
@@ -55,6 +60,27 @@ type MetricRelay interface {
 // CreateRelay is a factory for instantiating remote relays.
 func CreateRelay(config ConfigValues, logger Logger) MetricRelay {
 	switch config.Relay.Type {
+	case RelayTypeInfluxDB:
+		// Create a relay to carbon.
+		relay := new(InfluxDBRelay)
+		relay.FlushInterval = config.Relay.Flush
+		relay.Percentile = config.Stats.Percentile
+		relay.SetPrefixesAndSuffixes(config)
+		// TODO break this out, move to connectionpool
+		c, err := client.NewHTTPClient(client.HTTPConfig{
+			Addr: config.Backend.Host + ":" + strconv.Itoa(config.Backend.Port),
+			// Username: XXX,
+			// Password: XXX,
+		})
+		// pool, err := CreateConnectionPool(config.Relay.Concurrency, fmt.Sprintf("%s:%d", config.Backend.Host, config.Backend.Port), ConnPoolTypeTcp, config.Relay.Timeout, logger)
+		// TODO wait and retry
+		if err != nil {
+			panic(fmt.Sprintf("Fatal error, could not create an influxdb client to %s:%d", config.Backend.Host, config.Backend.Port))
+		}
+		relay.Client = &c
+		relay.DB = config.Backend.DB
+		logger.Info.Println("Relaying metrics to influxdb backend")
+		return relay
 	case RelayTypeCarbon:
 		// Create a relay to carbon.
 		relay := new(CarbonRelay)
@@ -62,9 +88,9 @@ func CreateRelay(config ConfigValues, logger Logger) MetricRelay {
 		relay.Percentile = config.Stats.Percentile
 		relay.SetPrefixesAndSuffixes(config)
 		// Create a connection pool for the relay to use.
-		pool, err := CreateConnectionPool(config.Relay.Concurrency, fmt.Sprintf("%s:%d", config.Carbon.Host, config.Carbon.Port), ConnPoolTypeTcp, config.Relay.Timeout, logger)
+		pool, err := CreateConnectionPool(config.Relay.Concurrency, fmt.Sprintf("%s:%d", config.Backend.Host, config.Backend.Port), ConnPoolTypeTcp, config.Relay.Timeout, logger)
 		if err != nil {
-			panic(fmt.Sprintf("Fatal error, could not create a connection pool to %s:%d", config.Carbon.Host, config.Carbon.Port))
+			panic(fmt.Sprintf("Fatal error, could not create a connection pool to %s:%d", config.Backend.Host, config.Backend.Port))
 		}
 		relay.ConnectionPool = pool
 		logger.Info.Println("Relaying metrics to carbon backend")
@@ -78,6 +104,166 @@ func CreateRelay(config ConfigValues, logger Logger) MetricRelay {
 		logger.Info.Println("Relaying metrics to mock backend")
 		return relay
 	}
+}
+
+// InfluxDBRelay implements MetricRelay.
+type InfluxDBRelay struct {
+	FlushInterval time.Duration
+	Percentile    []int
+	Client        *client.Client
+	DB            string
+	Prefixes      map[int]string
+	Suffixes      map[int]string
+}
+
+// SetPrefixesAndSuffixes is a helper to set the prefixes and suffixes from
+// config when relaying data.
+func (c *InfluxDBRelay) SetPrefixesAndSuffixes(config ConfigValues) {
+	prefix := ""
+	suffix := ""
+	c.Prefixes = map[int]string{}
+	c.Suffixes = map[int]string{}
+
+	configPrefixes := map[int]string{
+		NamespaceTypeCounter: config.Namespace.Prefixes.Counters,
+		NamespaceTypeGauge:   config.Namespace.Prefixes.Gauges,
+		NamespaceTypeRate:    config.Namespace.Prefixes.Rates,
+		NamespaceTypeSet:     config.Namespace.Prefixes.Sets,
+		NamespaceTypeTimer:   config.Namespace.Prefixes.Timers,
+	}
+
+	configSuffixes := map[int]string{
+		NamespaceTypeCounter: config.Namespace.Suffixes.Counters,
+		NamespaceTypeGauge:   config.Namespace.Suffixes.Gauges,
+		NamespaceTypeRate:    config.Namespace.Suffixes.Rates,
+		NamespaceTypeSet:     config.Namespace.Suffixes.Sets,
+		NamespaceTypeTimer:   config.Namespace.Suffixes.Timers,
+	}
+
+	// Global prefix.
+	if config.Namespace.Prefix != "" {
+		prefix = config.Namespace.Prefix + "."
+	}
+
+	// Type prefixes.
+	for metricType, typePrefix := range configPrefixes {
+		c.Prefixes[metricType] = prefix
+		if typePrefix != "" {
+			c.Prefixes[metricType] = prefix + typePrefix + "."
+		}
+	}
+
+	// Global suffix.
+	if config.Namespace.Suffix != "" {
+		suffix = "." + config.Namespace.Suffix
+	}
+
+	// Type suffixes
+	for metricType, typeSuffix := range configSuffixes {
+		c.Suffixes[metricType] = suffix
+		if typeSuffix != "" {
+			c.Suffixes[metricType] = "." + typeSuffix + suffix
+		}
+	}
+}
+
+// Relay implements MetricRelay::Relay().
+func (c InfluxDBRelay) Relay(metric Metric, logger Logger) bool {
+	ProcessMetric(&metric, c.FlushInterval, c.Percentile, logger)
+	// @todo: are we ever setting flush time?
+
+	stringTime := time.Unix(int64(metric.FlushTime), 0)
+	var key string
+	var qkey string
+	var tags map[string]string
+	switch metric.MetricType {
+	case MetricTypeGauge:
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeGauge], "suffix": c.Suffixes[NamespaceTypeGauge]}
+		go sendInfluxDBMetric(metric.Key, metric.LastValue, tags, stringTime, true, c, logger)
+	case MetricTypeCounter:
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeRate], "suffix": c.Suffixes[NamespaceTypeRate]}
+		go sendInfluxDBMetric(metric.Key, metric.ValuesPerSecond, tags, stringTime, true, c, logger)
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeCounter], "suffix": c.Suffixes[NamespaceTypeCounter]}
+		go sendInfluxDBMetric(metric.Key, metric.LastValue, tags, stringTime, true, c, logger)
+	case MetricTypeSet:
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeSet], "suffix": c.Suffixes[NamespaceTypeSet]}
+		go sendInfluxDBMetric(metric.Key, metric.LastValue, tags, stringTime, true, c, logger)
+	case MetricTypeTimer:
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeRate], "suffix": c.Suffixes[NamespaceTypeRate]}
+		go sendInfluxDBMetric(metric.Key, metric.ValuesPerSecond, tags, stringTime, true, c, logger)
+
+		// Cumulative values.
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "mean_value"}
+		go sendInfluxDBMetric(metric.Key, metric.MeanValue, tags, stringTime, true, c, logger)
+
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "median_value"}
+		go sendInfluxDBMetric(metric.Key, metric.MedianValue, tags, stringTime, true, c, logger)
+
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "max_value"}
+		go sendInfluxDBMetric(metric.Key, metric.MaxValue, tags, stringTime, true, c, logger)
+
+		tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "min_value"}
+		go sendInfluxDBMetric(metric.Key, metric.MinValue, tags, stringTime, true, c, logger)
+
+		// Quantile values.
+		for _, q := range metric.Quantiles {
+			qkey = strconv.FormatInt(int64(q.Quantile), 10)
+
+			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "mean_" + qkey}
+			go sendInfluxDBMetric(key, q.Mean, tags, stringTime, true, c, logger)
+
+			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "median_" + qkey}
+			go sendInfluxDBMetric(key, q.Median, tags, stringTime, true, c, logger)
+
+			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "upper_" + qkey}
+			go sendInfluxDBMetric(key, q.Max, tags, stringTime, true, c, logger)
+
+			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "sum_" + qkey}
+			go sendInfluxDBMetric(key, q.Sum, tags, stringTime, true, c, logger)
+		}
+	}
+	return true
+}
+
+// sendInfluxDBMetric formats a message and a value and time and sends to InfluxDB.
+func sendInfluxDBMetric(key string, v float64, tags map[string]string, t time.Time, retry bool, relay InfluxDBRelay, logger Logger) bool {
+	// Send to the remote host.
+	conn := *relay.Client
+
+	// Create a new point batch
+	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
+		Database:  relay.DB,
+		Precision: "s",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a point and add to batch
+	fields := map[string]interface{}{
+		"value": v,
+	}
+
+	pt, err := client.NewPoint(key, tags, fields, t)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bp.AddPoint(pt)
+
+	// Write the batch
+	writeErr := conn.Write(bp)
+	if writeErr != nil {
+		// If data was not sent, likely a socket timeout, we'll retry one time.
+		if retry {
+			return sendInfluxDBMetric(key, v, tags, t, false, relay, logger)
+		}
+	}
+
+	// Write to the connection.
+	// _, writeErr := fmt.Fprint(conn, payload.String())
+
+	// TODO implement logger
+	return true
 }
 
 // CarbonRelay implements MetricRelay.

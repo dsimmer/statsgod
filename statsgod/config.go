@@ -18,11 +18,12 @@
 package statsgod
 
 import (
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
 	"regexp"
 	"time"
+
+	"gopkg.in/yaml.v2"
 )
 
 // ConfigValues describes the data type that configuration is loaded into. The
@@ -87,9 +88,10 @@ type ConfigValues struct {
 			Timers   string
 		}
 	}
-	Carbon struct {
+	Backend struct {
 		Host string
 		Port int
+		DB   string
 	}
 	Stats struct {
 		Percentile []int
@@ -139,8 +141,8 @@ func (config *ConfigValues) LoadFile(filePath string) error {
 	config.Relay.Flush = 10 * time.Second
 
 	// Carbon
-	config.Carbon.Host = "127.0.0.1"
-	config.Carbon.Port = 2003
+	config.Backend.Host = "127.0.0.1"
+	config.Backend.Port = 2003
 
 	// Namespace
 	config.Namespace.Prefix = "stats"

@@ -74,7 +74,7 @@ func CreateConnectionPool(size int, addr string, connType int, timeout time.Dura
 	return pool, nil
 }
 
-// CreateConnection attempts to contact the remote relay host.
+// CreateConnection attempts to contact the remote relay host. Not required for influx as it is a http protocol and thus we are the relay.
 func (pool *ConnectionPool) CreateConnection(logger Logger) (bool, error) {
 
 	if len(pool.Connections) < pool.Size {

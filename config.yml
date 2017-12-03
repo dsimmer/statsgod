@@ -46,15 +46,16 @@ connection:
 ###
 # Backend relay carbon server configuration
 ###
-carbon:
+backend:
    host: 127.0.0.1
-   port: 2003
+   port: 8086
+   db: statsd
 
 ###
 # Relay connection options
 ###
 relay:
-    type: carbon   # One of "mock" or "carbon".
+    type: influxdb   # One of "mock" or "carbon" or "influxdb".
     concurrency: 1 # Normally use 1 for carbon.
     timeout: 30s   # How long to sit idle on a connection.
     flush: 10s     # How frequently to flush to the relay.
