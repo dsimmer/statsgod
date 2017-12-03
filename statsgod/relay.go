@@ -75,7 +75,7 @@ func CreateRelay(config ConfigValues, logger Logger) MetricRelay {
 		// pool, err := CreateConnectionPool(config.Relay.Concurrency, fmt.Sprintf("%s:%d", config.Backend.Host, config.Backend.Port), ConnPoolTypeTcp, config.Relay.Timeout, logger)
 		// TODO wait and retry
 		if err != nil {
-			panic(fmt.Sprintf("Fatal error, could not create an influxdb client to %s:%d", config.Backend.Host, config.Backend.Port))
+			panic(fmt.Sprintf("Fatal error, could not create an influxdb client to %s:%d, error: %s", config.Backend.Host, config.Backend.Port, err.Error()))
 		}
 		relay.Client = &c
 		relay.DB = config.Backend.DB
@@ -142,14 +142,14 @@ func (c *InfluxDBRelay) SetPrefixesAndSuffixes(config ConfigValues) {
 
 	// Global prefix.
 	if config.Namespace.Prefix != "" {
-		prefix = config.Namespace.Prefix + "."
+		prefix = config.Namespace.Prefix
 	}
 
 	// Type prefixes.
 	for metricType, typePrefix := range configPrefixes {
 		c.Prefixes[metricType] = prefix
 		if typePrefix != "" {
-			c.Prefixes[metricType] = prefix + typePrefix + "."
+			c.Prefixes[metricType] = prefix + typePrefix
 		}
 	}
 
@@ -162,7 +162,7 @@ func (c *InfluxDBRelay) SetPrefixesAndSuffixes(config ConfigValues) {
 	for metricType, typeSuffix := range configSuffixes {
 		c.Suffixes[metricType] = suffix
 		if typeSuffix != "" {
-			c.Suffixes[metricType] = "." + typeSuffix + suffix
+			c.Suffixes[metricType] = typeSuffix + suffix
 		}
 	}
 }
@@ -173,7 +173,6 @@ func (c InfluxDBRelay) Relay(metric Metric, logger Logger) bool {
 	// @todo: are we ever setting flush time?
 
 	stringTime := time.Unix(int64(metric.FlushTime), 0)
-	var key string
 	var qkey string
 	var tags map[string]string
 	switch metric.MetricType {
@@ -210,16 +209,16 @@ func (c InfluxDBRelay) Relay(metric Metric, logger Logger) bool {
 			qkey = strconv.FormatInt(int64(q.Quantile), 10)
 
 			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "mean_" + qkey}
-			go sendInfluxDBMetric(key, q.Mean, tags, stringTime, true, c, logger)
+			go sendInfluxDBMetric(metric.Key, q.Mean, tags, stringTime, true, c, logger)
 
 			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "median_" + qkey}
-			go sendInfluxDBMetric(key, q.Median, tags, stringTime, true, c, logger)
+			go sendInfluxDBMetric(metric.Key, q.Median, tags, stringTime, true, c, logger)
 
 			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "upper_" + qkey}
-			go sendInfluxDBMetric(key, q.Max, tags, stringTime, true, c, logger)
+			go sendInfluxDBMetric(metric.Key, q.Max, tags, stringTime, true, c, logger)
 
 			tags = map[string]string{"prefix": c.Prefixes[NamespaceTypeTimer], "suffix": c.Suffixes[NamespaceTypeTimer], "dataType": "sum_" + qkey}
-			go sendInfluxDBMetric(key, q.Sum, tags, stringTime, true, c, logger)
+			go sendInfluxDBMetric(metric.Key, q.Sum, tags, stringTime, true, c, logger)
 		}
 	}
 	return true
@@ -243,7 +242,7 @@ func sendInfluxDBMetric(key string, v float64, tags map[string]string, t time.Ti
 	fields := map[string]interface{}{
 		"value": v,
 	}
-
+	log.Println(key)
 	pt, err := client.NewPoint(key, tags, fields, t)
 	if err != nil {
 		log.Fatal(err)

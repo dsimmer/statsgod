@@ -47,7 +47,7 @@ connection:
 # Backend relay carbon server configuration
 ###
 backend:
-   host: 127.0.0.1
+   host: http://127.0.0.1
    port: 8086
    db: statsd
 
@@ -64,7 +64,7 @@ relay:
 # Namespace options
 ###
 namespace:
-    prefix: "stats"
+    prefix: ""
     prefixes:
         counters: "counts"
         gauges: "gauges"
